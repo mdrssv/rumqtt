@@ -406,6 +406,11 @@ impl AckLog {
         self.committed.push_back(ack);
     }
 
+    pub fn pubrec_ack_only(&mut self, ack: PubRec) {
+        let ack = Ack::PubRec(ack);
+        self.committed.push_back(ack);
+    }
+
     pub fn pubrel(&mut self, ack: PubRel) {
         let ack = Ack::PubRel(ack);
         self.committed.push_back(ack);

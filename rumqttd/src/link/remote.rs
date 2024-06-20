@@ -4,7 +4,7 @@ use crate::link::network::Network;
 use crate::local::LinkBuilder;
 use crate::protocol::{ConnAck, Connect, ConnectReturnCode, Login, Packet, Protocol};
 use crate::router::{Event, Notification};
-use crate::{ConnectionId, ConnectionSettings};
+use crate::{Acl, ConnectionId, ConnectionSettings};
 
 use flume::{RecvError, SendError, Sender, TrySendError};
 use std::cmp::min;
@@ -64,9 +64,11 @@ impl<P: Protocol> RemoteLink<P> {
     pub async fn new(
         router_tx: Sender<(ConnectionId, Event)>,
         tenant_id: Option<String>,
+        username: Option<String>,
         mut network: Network<P>,
         connect_packet: Packet,
         dynamic_filters: bool,
+        acls: &[Acl],
         assigned_client_id: Option<String>,
     ) -> Result<RemoteLink<P>, Error> {
         let Packet::Connect(connect, props, lastwill, lastwill_props, _) = connect_packet else {
@@ -95,8 +97,10 @@ impl<P: Protocol> RemoteLink<P> {
 
         let (link_tx, link_rx, notification) = LinkBuilder::new(client_id, router_tx)
             .tenant_id(tenant_id)
+            .username(username)
             .clean_session(clean_session)
             .last_will(lastwill)
+            .acls(acls)
             .last_will_properties(lastwill_props)
             .dynamic_filters(dynamic_filters)
             .topic_alias_max(topic_alias_max.unwrap_or(0))
@@ -281,6 +285,7 @@ mod tests {
             max_payload_size: 0,
             max_inflight_count: 0,
             auth: None,
+            acls: vec![],
             external_auth: None,
             dynamic_filters: false,
         }
