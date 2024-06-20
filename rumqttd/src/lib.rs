@@ -6,6 +6,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::{collections::HashMap, path::Path};
 
+use router::PublishFilterRef;
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::{
     filter::EnvFilter,
