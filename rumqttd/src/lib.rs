@@ -6,7 +6,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::{collections::HashMap, path::Path};
 
-use router::PublishFilterRef;
 use serde::{Deserialize, Serialize};
 use tracing_subscriber::{
     filter::EnvFilter,
@@ -22,7 +21,7 @@ use tracing_subscriber::{
 pub use link::alerts;
 pub use link::local;
 pub use link::meters;
-pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
+pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter, PublishFilter, PublishFilterRef};
 use segments::Storage;
 pub use server::Broker;
 
