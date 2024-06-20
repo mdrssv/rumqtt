@@ -21,7 +21,10 @@ use tracing_subscriber::{
 pub use link::alerts;
 pub use link::local;
 pub use link::meters;
-pub use router::{Alert, IncomingMeter, Meter, Notification, OutgoingMeter};
+pub use router::{
+    Acl, AclError, AclRule, Alert, IncomingMeter, Meter, Notification, OutgoingMeter,
+    PublishFilter, PublishFilterContext, PublishFilterRef,
+};
 use segments::Storage;
 pub use server::Broker;
 
@@ -148,6 +151,8 @@ pub struct ConnectionSettings {
     pub max_payload_size: usize,
     pub max_inflight_count: usize,
     pub auth: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub acls: Vec<Acl>,
     #[serde(skip)]
     pub external_auth: Option<AuthHandler>,
     #[serde(default)]

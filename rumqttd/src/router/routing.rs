@@ -10,6 +10,7 @@ use crate::router::{ConnectionEvents, Forward};
 use crate::segments::Position;
 use crate::*;
 use flume::{bounded, Receiver, RecvError, Sender, TryRecvError};
+use router::connection::{self, TENANTS_PREFIX};
 use slab::Slab;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::Utf8Error;
@@ -70,6 +71,8 @@ pub struct Router {
     connections: Slab<Connection>,
     /// Connection map from device id to connection id
     connection_map: HashMap<String, ConnectionId>,
+    /// Filters to be applied to an [`Publish`] packets payload
+    publish_filters: Vec<PublishFilterRef>,
     /// Subscription map to interested connection ids
     subscription_map: HashMap<Filter, HashSet<ConnectionId>>,
     /// Incoming data grouped by connection
@@ -105,7 +108,11 @@ pub struct Router {
 }
 
 impl Router {
-    pub fn new(router_id: RouterId, config: RouterConfig) -> Router {
+    pub fn new(
+        router_id: RouterId,
+        publish_filters: Vec<PublishFilterRef>,
+        config: RouterConfig,
+    ) -> Router {
         let (router_tx, router_rx) = bounded(1000);
 
         let meters = Slab::with_capacity(10);
@@ -129,6 +136,7 @@ impl Router {
             alerts,
             connections,
             connection_map: Default::default(),
+            publish_filters,
             subscription_map: Default::default(),
             ibufs,
             obufs,
@@ -557,12 +565,48 @@ impl Router {
 
         for packet in packets.drain(0..) {
             match packet {
-                Packet::Publish(publish, properties) => {
+                Packet::Publish(mut publish, mut properties) => {
+                    println!(
+                        "publish: {publish:?} payload: {:?}",
+                        publish.payload.to_vec()
+                    );
                     let span = tracing::error_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
                     let qos = publish.qos;
                     let pkid = publish.pkid;
+
+                    let connection = &self.connections[id];
+                    let passed_acl = {
+                        // ACLs are only applicable is there is at least one defined
+                        if connection.acls.len() > 0 {
+                            let topic_str = std::str::from_utf8(&publish.topic);
+                            // Non UTF8 topic constitutes an invalid topic
+                            if let Ok(topic) = topic_str {
+                                if !connection.acls.iter().any(|acl| {
+                                    acl.matches(connection, &topic, false, true)
+                                        .unwrap_or_default()
+                                }) {
+                                    info!("failed acl");
+                                    false
+                                } else {
+                                    info!("passed acl");
+                                    true
+                                }
+                            } else {
+                                false
+                            }
+                        } else {
+                            true
+                        }
+                    };
+
+                    // Decide weather to keep or discard this packet
+                    // Packet will be discard if *at least one* filter returns *false*
+                    let keep = passed_acl
+                        && self.publish_filters.iter().fold(true, |keep, f| {
+                            keep && f.filter(&connection.into(), &mut publish, properties.as_mut())
+                        });
 
                     // Prepare acks for the above publish
                     // If any of the publish in the batch results in force flush,
@@ -577,12 +621,15 @@ impl Router {
                     // coordinate using multiple offsets, and we don't have any idea how to do so right now.
                     // Currently as we don't have replication, we just use a single offset, even when appending to
                     // multiple commit logs.
-
                     match qos {
                         QoS::AtLeastOnce => {
                             let puback = PubAck {
                                 pkid,
-                                reason: PubAckReason::Success,
+                                reason: match (keep, passed_acl) {
+                                    (false, false) => PubAckReason::NotAuthorized,
+                                    (false, true) => PubAckReason::PayloadFormatInvalid,
+                                    _ => PubAckReason::Success,
+                                },
                             };
 
                             let ackslog = self.ackslog.get_mut(id).unwrap();
@@ -592,19 +639,29 @@ impl Router {
                         QoS::ExactlyOnce => {
                             let pubrec = PubRec {
                                 pkid,
-                                reason: PubRecReason::Success,
+                                reason: match (keep, passed_acl) {
+                                    (false, false) => PubRecReason::NotAuthorized,
+                                    // PayloadFormatInvalid would be the appropriate response(as
+                                    // per spec),
+                                    // however mosquitto does not accept PayloadFormatInvalid for
+                                    // PubRel packets 
+                                    // (false, true) => PubRecReason::PayloadFormatInvalid,
+                                    (false, true) => PubRecReason::UnspecifiedError,
+                                    _ => PubRecReason::Success,
+                                },
                             };
 
                             let ackslog = self.ackslog.get_mut(id).unwrap();
-                            ackslog.pubrec(publish, properties, pubrec);
+                            ackslog.pubrec(publish.clone(),properties.clone(),pubrec);
                             force_ack = true;
-                            continue;
                         }
                         QoS::AtMostOnce => {
                             // Do nothing
                         }
                     };
-
+                    if !keep {
+                        continue;
+                    }
                     self.router_meters.total_publishes += 1;
 
                     // Try to append publish to commitlog
@@ -655,8 +712,19 @@ impl Router {
                             tracing::info_span!("subscribe", topic = f.path, pkid = subscribe.pkid);
                         let _guard = span.enter();
 
-                        info!("Adding subscription on topic {}", f.path);
                         let connection = self.connections.get_mut(id).unwrap();
+
+                        if dbg!(&connection.acls).len() > 0
+                            && !connection.acls.iter().any(|acl| {
+                                acl.matches(connection, &f.path, true, false)
+                                    .unwrap_or_default()
+                            })
+                        {
+                            info!("Refusing subscription on topic {}", f.path);
+                            return_codes.push(SubscribeReasonCode::NotAuthorized);
+                            continue;
+                        }
+                        info!("Adding subscription on topic {}", f.path);
 
                         if let Err(e) = validate_subscription(connection, f) {
                             warn!(reason = ?e,"Subscription cannot be validated: {}", e);
@@ -1218,10 +1286,14 @@ fn append_to_commitlog(
 
     // Ensure that only clients associated with a tenant can publish to tenant's topic
     #[cfg(feature = "validate-tenant-prefix")]
-    if let Some(tenant_prefix) = &connection.tenant_prefix {
-        if !topic.starts_with(tenant_prefix) {
+    if let Some(tenant_id) = &connection.tenant_id {
+        if !topic
+            .split("/")
+            .take(2)
+            .eq([TENANTS_PREFIX, tenant_id.as_str()])
+        {
             return Err(RouterError::BadTenant(
-                tenant_prefix.to_owned(),
+                tenant_id.to_owned(),
                 topic.to_owned(),
             ));
         }
@@ -1272,7 +1344,7 @@ fn append_will_message(
     properties: Option<PublishProperties>,
     datalog: &mut DataLog,
     notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
-    #[cfg(feature = "validate-tenant-prefix")] tenant_prefix: Option<String>,
+    #[cfg(feature = "validate-tenant-prefix")] tenant_id: Option<String>,
 ) -> Result<Offset, RouterError> {
     // TODO: broker should properly send the disconnect packet!
     if properties
@@ -1289,10 +1361,14 @@ fn append_will_message(
 
     // Ensure that only clients associated with a tenant can publish to tenant's topic
     #[cfg(feature = "validate-tenant-prefix")]
-    if let Some(tenant_prefix) = tenant_prefix {
-        if !topic.starts_with(&tenant_prefix) {
+    if let Some(tenant_id) = tenant_id {
+        if !topic
+            .split("/")
+            .take(2)
+            .eq([TENANTS_PREFIX, tenant_id.as_str()])
+        {
             return Err(RouterError::BadTenant(
-                tenant_prefix.to_owned(),
+                tenant_id.to_owned(),
                 topic.to_owned(),
             ));
         }
@@ -1721,14 +1797,19 @@ fn validate_subscription(
     filter: &protocol::Filter,
 ) -> Result<(), RouterError> {
     trace!(
-        "validate subscription = {}, tenant = {:?}",
+        "validate subscription = {}, tenant = {TENANTS_PREFIX}/{:?}",
         filter.path,
-        connection.tenant_prefix
+        connection.tenant_id
     );
     // Ensure that only client devices of the tenant can
     #[cfg(feature = "validate-tenant-prefix")]
-    if let Some(tenant_prefix) = &connection.tenant_prefix {
-        if !filter.path.starts_with(tenant_prefix) {
+    if let Some(tenant_id) = &connection.tenant_id {
+        if !filter
+            .path
+            .split("/")
+            .take(2)
+            .eq([TENANTS_PREFIX, tenant_id.as_str()])
+        {
             return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
         }
     }

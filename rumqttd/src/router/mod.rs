@@ -15,8 +15,10 @@ use crate::{
     ConnectionId, Filter, RouterId, Topic,
 };
 
+mod acl;
 mod alertlog;
 mod connection;
+mod filter;
 mod graveyard;
 pub mod iobufs;
 mod logs;
@@ -25,8 +27,10 @@ mod scheduler;
 pub(crate) mod shared_subs;
 mod waiters;
 
+pub use acl::{Acl, AclError, AclRule};
 pub use alertlog::Alert;
 pub use connection::Connection;
+pub use filter::{PublishFilter, PublishFilterContext, PublishFilterRef};
 pub use routing::Router;
 pub use waiters::Waiters;
 

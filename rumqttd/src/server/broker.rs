@@ -9,7 +9,7 @@ use crate::protocol::v5::V5;
 use crate::protocol::{Packet, Protocol};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{meters, ConnectionSettings, Meter};
+use crate::{meters, Acl, ConnectionSettings, Meter};
 use flume::{RecvError, SendError, Sender};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -35,7 +35,7 @@ use std::{io, thread};
 
 use crate::link::console;
 use crate::link::local::{self, LinkRx, LinkTx};
-use crate::router::{Event, Router};
+use crate::router::{Event, PublishFilterRef, Router};
 use crate::{Config, ConnectionId, ServerSettings};
 
 use tokio::net::{TcpListener, TcpStream};
@@ -71,9 +71,29 @@ pub struct Broker {
 
 impl Broker {
     pub fn new(config: Config) -> Broker {
+        Self::with_filter(config, Vec::new())
+    }
+
+    /// Instantiate an new [`Broker`] with publish filters  
+    ///
+    /// * `config`: broker configuration
+    /// * `publish_filters`: takes a [`Vec`] of filters, [`PublishFilterRef`] can be constructed
+    /// from an [`Box<dyn PublishFilter> `] or an ordinary function
+    ///
+    /// Example:
+    /// ```
+    /// use rumqttd::{protocol::{Publish, PublishProperties}, Broker, Config, PublishFilterContext};
+    /// let config = Config::default();
+    /// fn my_filter(context: &PublishFilterContext, publish: &mut Publish, properties: Option<&mut
+    /// PublishProperties>) -> bool {
+    ///     unimplemented!()
+    /// }
+    /// let broker = Broker::with_filter(config, vec![(&my_filter).into()]);
+    /// ```
+    pub fn with_filter(config: Config, publish_filters: Vec<PublishFilterRef>) -> Broker {
         let config = Arc::new(config);
         let router_config = config.router.clone();
-        let router: Router = Router::new(config.id, router_config);
+        let router: Router = Router::new(config.id, publish_filters, router_config);
 
         // Setup cluster if cluster settings are configured.
         match config.cluster.clone() {
@@ -506,7 +526,7 @@ async fn remote<P: Protocol>(
 
     let dynamic_filters = config.dynamic_filters;
 
-    let connect_packet = match mqtt_connect(config, &mut network).await {
+    let connect_packet = match mqtt_connect(config.clone(), &mut network).await {
         Ok(p) => p,
         Err(e) => {
             error!(error=?e, "Error while handling MQTT connect packet");
@@ -514,10 +534,12 @@ async fn remote<P: Protocol>(
         }
     };
 
-    let (mut client_id, clean_session) = match &connect_packet {
-        Packet::Connect(ref connect, _, _, _, _) => {
-            (connect.client_id.clone(), connect.clean_session)
-        }
+    let (mut client_id, username, clean_session) = match &connect_packet {
+        Packet::Connect(ref connect, _, _, _, ref login) => (
+            connect.client_id.clone(),
+            login.as_ref().map(|login| &login.username),
+            connect.clean_session,
+        ),
         _ => unreachable!(),
     };
 
@@ -527,13 +549,12 @@ async fn remote<P: Protocol>(
         client_id = format!("rumqtt-{uuid}");
         assigned_client_id = Some(client_id.clone());
     }
-
-    if let Some(tenant_id) = &tenant_id {
-        // client_id is set to "tenant_id.client_id"
-        // this is to make sure we are consistent,
-        // as Connection uses this format of client_id
-        client_id = format!("{tenant_id}.{client_id}");
-    }
+    let mut client_id = match (&tenant_id, username) {
+        (Some(tenant_id), Some(username)) => format!("{username}.{tenant_id}.{client_id}"),
+        (Some(tenant_id), _) => format!("{tenant_id}.{client_id}"),
+        (_, Some(username)) => format!("{username}.{client_id}"),
+        _ => client_id,
+    };
 
     if let Some(sender) = will_handlers.lock().unwrap().remove(&client_id) {
         let awaiting_will = if clean_session {
@@ -554,9 +575,11 @@ async fn remote<P: Protocol>(
     let mut link = match RemoteLink::new(
         router_tx.clone(),
         tenant_id.clone(),
+        username.cloned(),
         network,
         connect_packet,
         dynamic_filters,
+        &config.acls,
         assigned_client_id,
     )
     .await
