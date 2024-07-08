@@ -576,7 +576,7 @@ impl Router {
                     let qos = publish.qos;
                     let pkid = publish.pkid;
 
-                    {
+                    let keep = {
                         let connection = &self.connections[id];
                         // ACLs are only applicable is there is at least one defined
                         if connection.acls.len() > 0 {
@@ -589,20 +589,25 @@ impl Router {
                                     .any(|acl| acl.write && acl.rule.matches_topic(&topic))
                                 {
                                     info!("failed acl");
-                                    continue;
+                                    false
+                                } else {
+                                    info!("passed acl");
+                                    true
                                 }
                             } else {
-                                continue;
+                                false
                             }
-                            info!("passed acl");
+                        } else {
+                            true
                         }
-                    }
+                    };
 
                     // Decide weather to keep or discard this packet
                     // Packet will be discard if *at least one* filter returns *false*
-                    let keep = self.publish_filters.iter().fold(true, |keep, f| {
-                        keep && f.filter(&mut publish, properties.as_mut())
-                    });
+                    let keep = keep
+                        && self.publish_filters.iter().fold(true, |keep, f| {
+                            keep && f.filter(&mut publish, properties.as_mut())
+                        });
 
                     // Prepare acks for the above publish
                     // If any of the publish in the batch results in force flush,
@@ -706,11 +711,11 @@ impl Router {
 
                         let connection = self.connections.get_mut(id).unwrap();
 
-                        if !(connection.acls.is_empty()
-                            || connection
+                        if connection.acls.len() > 0
+                            && !connection
                                 .acls
                                 .iter()
-                                .any(|acl| acl.read && acl.rule.matches_filter(&f.path)))
+                                .any(|acl| acl.read && acl.rule.matches_filter(&f.path))
                         {
                             info!("Refusing subscription on topic {}", f.path);
                             continue;
