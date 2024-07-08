@@ -588,11 +588,13 @@ impl Router {
                                     .iter()
                                     .any(|acl| acl.write && acl.rule.matches_topic(&topic))
                                 {
+                                    info!("failed acl");
                                     continue;
                                 }
                             } else {
                                 continue;
                             }
+                            info!("passed acl");
                         }
                     }
 
