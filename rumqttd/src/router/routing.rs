@@ -10,6 +10,7 @@ use crate::router::{ConnectionEvents, Forward};
 use crate::segments::Position;
 use crate::*;
 use flume::{bounded, Receiver, RecvError, Sender, TryRecvError};
+use router::connection;
 use slab::Slab;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::Utf8Error;
@@ -107,7 +108,11 @@ pub struct Router {
 }
 
 impl Router {
-    pub fn new(router_id: RouterId, publish_filters: Vec<PublishFilterRef>, config: RouterConfig) -> Router {
+    pub fn new(
+        router_id: RouterId,
+        publish_filters: Vec<PublishFilterRef>,
+        config: RouterConfig,
+    ) -> Router {
         let (router_tx, router_rx) = bounded(1000);
 
         let meters = Slab::with_capacity(10);
@@ -561,17 +566,38 @@ impl Router {
         for packet in packets.drain(0..) {
             match packet {
                 Packet::Publish(mut publish, mut properties) => {
-                    println!("publish: {publish:?} payload: {:?}", publish.payload.to_vec());
+                    println!(
+                        "publish: {publish:?} payload: {:?}",
+                        publish.payload.to_vec()
+                    );
                     let span = tracing::error_span!("publish", topic = ?publish.topic, pkid = publish.pkid);
                     let _guard = span.enter();
 
                     let qos = publish.qos;
                     let pkid = publish.pkid;
-                    
+
+                    {
+                        let connection = &self.connections[id];
+                        // ACLs are only applicable is there is at least one defined
+                        if connection.acls.len() > 0 {
+                            let topic_str = std::str::from_utf8(&publish.topic);
+                            // Non UTF8 topic constitutes an invalid topic
+                            if let Ok(topic) = topic_str {
+                                if !connection.acls.iter().any(|acl| acl.matches_topic(&topic)) {
+                                    continue;
+                                }
+                            } else {
+                                continue;
+                            }
+                        }
+                    }
+
                     // Decide weather to keep or discard this packet
                     // Packet will be discard if *at least one* filter returns *false*
-                    let keep = self.publish_filters.iter().fold(true,|keep,f| keep && f.filter(&mut publish, properties.as_mut())) ;
-                    
+                    let keep = self.publish_filters.iter().fold(true, |keep, f| {
+                        keep && f.filter(&mut publish, properties.as_mut())
+                    });
+
                     // Prepare acks for the above publish
                     // If any of the publish in the batch results in force flush,
                     // set global force flush flag. Force flush is triggered when the
@@ -589,7 +615,11 @@ impl Router {
                         QoS::AtLeastOnce => {
                             let puback = PubAck {
                                 pkid,
-                                reason: if keep { PubAckReason::Success } else { PubAckReason::PayloadFormatInvalid },
+                                reason: if keep {
+                                    PubAckReason::Success
+                                } else {
+                                    PubAckReason::PayloadFormatInvalid
+                                },
                             };
 
                             let ackslog = self.ackslog.get_mut(id).unwrap();
@@ -599,7 +629,11 @@ impl Router {
                         QoS::ExactlyOnce => {
                             let pubrec = PubRec {
                                 pkid,
-                                reason: if keep { PubRecReason::Success } else { PubRecReason::PayloadFormatInvalid },
+                                reason: if keep {
+                                    PubRecReason::Success
+                                } else {
+                                    PubRecReason::PayloadFormatInvalid
+                                },
                             };
 
                             let ackslog = self.ackslog.get_mut(id).unwrap();
@@ -664,8 +698,18 @@ impl Router {
                             tracing::info_span!("subscribe", topic = f.path, pkid = subscribe.pkid);
                         let _guard = span.enter();
 
-                        info!("Adding subscription on topic {}", f.path);
                         let connection = self.connections.get_mut(id).unwrap();
+
+                        if !(connection.acls.is_empty()
+                            || connection
+                                .acls
+                                .iter()
+                                .any(|acl| acl.matches_filter(&f.path)))
+                        {
+                            info!("Refusing subscription on topic {}", f.path);
+                            continue;
+                        }
+                        info!("Adding subscription on topic {}", f.path);
 
                         if let Err(e) = validate_subscription(connection, f) {
                             warn!(reason = ?e,"Subscription cannot be validated: {}", e);

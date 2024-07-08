@@ -1,8 +1,8 @@
 use slab::Slab;
 
 use crate::protocol::LastWillProperties;
-use crate::Filter;
 use crate::{protocol::LastWill, Topic};
+use crate::{AclRule, Filter};
 use std::collections::{HashMap, HashSet};
 
 use super::ConnectionEvents;
@@ -17,6 +17,8 @@ pub struct Connection {
     pub tenant_prefix: Option<String>,
     /// Dynamically create subscription filters incase they didn't exist during a publish
     pub dynamic_filters: bool,
+    /// ACLs with substitued variables for this connection
+    pub acls: Vec<AclRule>,
     /// Clean session
     pub clean: bool,
     /// Subscriptions
@@ -42,17 +44,28 @@ impl Connection {
         client_id: String,
         clean: bool,
         dynamic_filters: bool,
+        acls: &[AclRule],
     ) -> Connection {
         // Change client id to -> tenant_id.client_id and derive topic path prefix
         // to validate topics
         let (client_id, tenant_prefix) = match tenant_id {
-            Some(tenant_id) => {
+            Some(ref tenant_id) => {
                 let tenant_prefix = Some("/tenants/".to_owned() + &tenant_id + "/");
-                let client_id = tenant_id + "." + &client_id;
+                let client_id = tenant_id.to_owned() + "." + &client_id;
                 (client_id, tenant_prefix)
             }
             None => (client_id, None),
         };
+
+        let tenant_id_var= tenant_id.as_ref().map(|tenant_id| ("%u", tenant_id.as_str()));
+        let variables = [
+            Some(("%c", client_id.as_str())),
+            tenant_id_var,
+        ];
+        let acls = acls
+            .into_iter()
+            .map(|acl| acl.substitute_variables(variables.into_iter().filter_map(|var| var)))
+            .collect();
 
         Connection {
             client_id,
@@ -66,6 +79,7 @@ impl Connection {
             topic_aliases: HashMap::new(),
             broker_topic_aliases: None,
             subscription_ids: HashMap::new(),
+            acls,
         }
     }
 

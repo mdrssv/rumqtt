@@ -8,6 +8,12 @@ const TOPIC_ANY: &'static str = "+";
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct AclRule(Cow<'static, str>);
 
+impl Default for AclRule {
+    fn default() -> Self {
+        Self(TOPIC_WILDCARD.into())
+    }
+}
+
 impl From<&'static str> for AclRule {
     /// Creates an `AclRule` from a static string slice.
     ///

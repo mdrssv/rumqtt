@@ -9,7 +9,7 @@ use crate::protocol::v5::V5;
 use crate::protocol::{Packet, Protocol};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{meters, ConnectionSettings, Meter};
+use crate::{meters, AclRule, ConnectionSettings, Meter};
 use flume::{RecvError, SendError, Sender};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -66,6 +66,7 @@ pub enum Error {
 
 pub struct Broker {
     config: Arc<Config>,
+    acls: Vec<AclRule>,
     router_tx: Sender<(ConnectionId, Event)>,
 }
 
@@ -91,16 +92,27 @@ impl Broker {
                 // Start router first and then cluster in the background
                 let router_tx = router.spawn();
                 // cluster.spawn();
-                Broker { config, router_tx }
+                Broker {
+                    config,
+                    router_tx,
+                    acls: vec![],
+                }
             }
             None => {
                 let router_tx = router.spawn();
-                Broker { config, router_tx }
+                Broker {
+                    config,
+                    router_tx,
+                    acls: vec![],
+                }
             }
         }
     }
 
-
+    pub fn with_acls<A: Into<AclRule>, I: IntoIterator<Item = A>>(mut self, acls: I) -> Self {
+        self.acls = acls.into_iter().map(|acl| acl.into()).collect();
+        self
+    }
 
     // pub fn new_local_cluster(
     //     config: Config,
@@ -156,8 +168,9 @@ impl Broker {
     pub fn link(&self, client_id: &str) -> Result<(LinkTx, LinkRx), local::LinkError> {
         // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex. max connection limit).
-        let (link_tx, link_rx, _ack) =
-            LinkBuilder::new(client_id, self.router_tx.clone()).build()?;
+        let (link_tx, link_rx, _ack) = LinkBuilder::new(client_id, self.router_tx.clone())
+            .acls(&self.acls[..])
+            .build()?;
         Ok((link_tx, link_rx))
     }
 
