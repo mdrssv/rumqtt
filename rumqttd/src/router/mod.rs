@@ -15,6 +15,7 @@ use crate::{
     ConnectionId, Filter, RouterId, Topic,
 };
 
+mod acl;
 mod alertlog;
 mod connection;
 mod graveyard;
@@ -27,6 +28,7 @@ mod waiters;
 mod filter;
 
 pub use filter::{PublishFilter, PublishFilterRef};
+pub use acl::AclRule;
 pub use alertlog::Alert;
 pub use connection::Connection;
 pub use routing::Router;
