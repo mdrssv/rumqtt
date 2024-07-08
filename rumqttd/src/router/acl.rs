@@ -1,8 +1,78 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, str::FromStr};
+use thiserror::Error;
 
 const TOPIC_SEP: &'static str = "/";
 const TOPIC_WILDCARD: &'static str = "#";
 const TOPIC_ANY: &'static str = "+";
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct Acl {
+    /// Rule, describing which topic this ACL applies to
+    pub rule: AclRule,
+    /// Indicates whether the topic in question can be subscribed to
+    pub read: bool,
+    /// Indicated whether to topic in question can be published to
+    pub write: bool,
+}
+
+impl Acl {
+    /// Creates an new `Acl` from an given rule.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use rumqttd::Acl;
+    /// let acl = Acl::new("test/#", true, false);
+    /// ```
+    ///
+    /// From string
+    /// ```
+    /// use rumqttd::Acl;
+    /// let acl: Acl = "test/#:rw".parse().unwrap();
+    /// # assert_eq!(acl, Acl { rule: "test/#".into(), read: true, write: true });
+    /// # assert_eq!("test/#".parse::<Acl>(), Err(AclError::NoFlags));
+    /// ```
+    pub fn new(rule: impl Into<AclRule>, read: bool, write: bool) -> Self {
+        Self {
+            rule: rule.into(),
+            read,
+            write,
+        }
+    }
+
+    #[doc(alias = "AclRule::substitute_variables")]
+    pub fn substitute_variables<'a, V: IntoIterator<Item = (&'a str, S)>, S: AsRef<str>>(
+        &self,
+        variables: V,
+    ) -> Self {
+        let rule = self.rule.substitute_variables(variables);
+        Self {
+            rule,
+            ..self.clone()
+        }
+    }
+}
+
+#[derive(Debug, Eq, PartialEq, Error)]
+pub enum AclError {
+    #[error("acl does not contain an ':'")]
+    NoFlags,
+}
+
+impl FromStr for Acl {
+    type Err = AclError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let last_colon = s.rfind(":").ok_or(AclError::NoFlags)?;
+        let rule = &s[..last_colon];
+        let flags = &s[last_colon..][1..];
+        Ok(Self {
+            rule: rule.to_owned().into(),
+            read: flags.contains("r"),
+            write: flags.contains("w"),
+        })
+    }
+}
 
 /// Represents an Access Control List (ACL) rule.
 #[derive(Debug, Clone, Eq, PartialEq)]

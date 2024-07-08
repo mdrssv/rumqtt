@@ -28,7 +28,7 @@ mod waiters;
 mod filter;
 
 pub use filter::{PublishFilter, PublishFilterRef};
-pub use acl::AclRule;
+pub use acl::{Acl, AclError, AclRule};
 pub use alertlog::Alert;
 pub use connection::Connection;
 pub use routing::Router;

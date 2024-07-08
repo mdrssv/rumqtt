@@ -583,7 +583,11 @@ impl Router {
                             let topic_str = std::str::from_utf8(&publish.topic);
                             // Non UTF8 topic constitutes an invalid topic
                             if let Ok(topic) = topic_str {
-                                if !connection.acls.iter().any(|acl| acl.matches_topic(&topic)) {
+                                if !connection
+                                    .acls
+                                    .iter()
+                                    .any(|acl| acl.write && acl.rule.matches_topic(&topic))
+                                {
                                     continue;
                                 }
                             } else {
@@ -704,7 +708,7 @@ impl Router {
                             || connection
                                 .acls
                                 .iter()
-                                .any(|acl| acl.matches_filter(&f.path)))
+                                .any(|acl| acl.read && acl.rule.matches_filter(&f.path)))
                         {
                             info!("Refusing subscription on topic {}", f.path);
                             continue;

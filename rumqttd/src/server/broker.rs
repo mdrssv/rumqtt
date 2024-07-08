@@ -9,7 +9,7 @@ use crate::protocol::v5::V5;
 use crate::protocol::{Packet, Protocol};
 #[cfg(any(feature = "use-rustls", feature = "use-native-tls"))]
 use crate::server::tls::{self, TLSAcceptor};
-use crate::{meters, AclRule, ConnectionSettings, Meter};
+use crate::{meters, Acl, ConnectionSettings, Meter};
 use flume::{RecvError, SendError, Sender};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -66,7 +66,7 @@ pub enum Error {
 
 pub struct Broker {
     config: Arc<Config>,
-    acls: Vec<AclRule>,
+    acls: Vec<Acl>,
     router_tx: Sender<(ConnectionId, Event)>,
 }
 
@@ -109,7 +109,7 @@ impl Broker {
         }
     }
 
-    pub fn with_acls<A: Into<AclRule>, I: IntoIterator<Item = A>>(mut self, acls: I) -> Self {
+    pub fn with_acls<A: Into<Acl>, I: IntoIterator<Item = A>>(mut self, acls: I) -> Self {
         self.acls = acls.into_iter().map(|acl| acl.into()).collect();
         self
     }

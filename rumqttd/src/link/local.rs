@@ -6,7 +6,7 @@ use crate::router::{
     iobufs::{Incoming, Outgoing},
     Connection, Event, Notification, ShadowRequest,
 };
-use crate::{AclRule, ConnectionId};
+use crate::{Acl, ConnectionId};
 use bytes::Bytes;
 use flume::{Receiver, RecvError, RecvTimeoutError, SendError, Sender, TrySendError};
 use parking_lot::lock_api::MutexGuard;
@@ -48,7 +48,7 @@ pub struct LinkBuilder<'a> {
     dynamic_filters: bool,
     // default to 0, indicating to not use topic alias
     topic_alias_max: u16,
-    acls: &'a [AclRule],
+    acls: &'a [Acl],
 }
 
 impl<'a> LinkBuilder<'a> {
@@ -76,7 +76,7 @@ impl<'a> LinkBuilder<'a> {
         self
     }
 
-    pub fn acls(mut self, acls: &'a [AclRule]) -> Self {
+    pub fn acls(mut self, acls: &'a [Acl]) -> Self {
         self.acls = acls;
         self
     }
