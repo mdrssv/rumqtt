@@ -151,6 +151,8 @@ pub struct ConnectionSettings {
     pub max_payload_size: usize,
     pub max_inflight_count: usize,
     pub auth: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub acls: Vec<Acl>,
     #[serde(skip)]
     pub external_auth: Option<AuthHandler>,
     #[serde(default)]

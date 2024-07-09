@@ -1,11 +1,13 @@
-use std::{borrow::Cow, str::FromStr};
+use std::{borrow::Cow, fmt::Display, str::FromStr};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 const TOPIC_SEP: &'static str = "/";
 const TOPIC_WILDCARD: &'static str = "#";
 const TOPIC_ANY: &'static str = "+";
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
 pub struct Acl {
     /// Rule, describing which topic this ACL applies to
     pub rule: AclRule,
@@ -53,6 +55,25 @@ impl Acl {
     }
 }
 
+impl Display for Acl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let flag = |flag, char| {
+            if flag {
+                char
+            } else {
+                ""
+            }
+        };
+        write!(
+            f,
+            "{}:{}{}",
+            self.rule,
+            flag(self.read, "r"),
+            flag(self.write, "w")
+        )
+    }
+}
+
 #[derive(Debug, Eq, PartialEq, Error)]
 pub enum AclError {
     #[error("acl does not contain an ':'")]
@@ -71,6 +92,28 @@ impl FromStr for Acl {
             read: flags.contains("r"),
             write: flags.contains("w"),
         })
+    }
+}
+
+impl TryFrom<&str> for Acl {
+    type Error = <Self as FromStr>::Err;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::from_str(value)
+    }
+}
+
+impl TryFrom<String> for Acl {
+    type Error = <Self as FromStr>::Err;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::from_str(&value)
+    }
+}
+
+impl Into<String> for Acl {
+    fn into(self) -> String {
+        self.to_string()
     }
 }
 
@@ -109,6 +152,12 @@ impl From<String> for AclRule {
     /// ```
     fn from(value: String) -> Self {
         Self(Cow::Owned(value))
+    }
+}
+
+impl Display for AclRule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_ref().fmt(f)
     }
 }
 
@@ -314,5 +363,11 @@ mod tests {
             rule.substitute_variables([("%c", id)]).0,
             Cow::Borrowed(_)
         ));
+    }
+
+    #[test]
+    fn string_parse() {
+        let rule: Acl = "test/+:r".parse().unwrap();
+        assert_eq!(rule.to_string().parse::<Acl>().unwrap(), rule);
     }
 }

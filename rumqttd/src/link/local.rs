@@ -38,6 +38,7 @@ pub enum LinkError {
 // used to build LinkTx and LinkRx
 pub struct LinkBuilder<'a> {
     tenant_id: Option<String>,
+    username: Option<String>,
     client_id: &'a str,
     router_tx: Sender<(ConnectionId, Event)>,
     // true by default
@@ -57,6 +58,7 @@ impl<'a> LinkBuilder<'a> {
             client_id,
             router_tx,
             tenant_id: None,
+            username: None,
             clean_session: true,
             last_will: None,
             last_will_properties: None,
@@ -68,6 +70,11 @@ impl<'a> LinkBuilder<'a> {
 
     pub fn tenant_id(mut self, tenant_id: Option<String>) -> Self {
         self.tenant_id = tenant_id;
+        self
+    }
+
+    pub fn username(mut self, username: Option<String>) -> Self {
+        self.username = username;
         self
     }
 
@@ -109,6 +116,7 @@ impl<'a> LinkBuilder<'a> {
         // Local connections to the router shall have access to all subscriptions
         let mut connection = Connection::new(
             self.tenant_id,
+            self.username,
             self.client_id.to_owned(),
             self.clean_session,
             self.dynamic_filters,

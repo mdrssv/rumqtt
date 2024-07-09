@@ -576,7 +576,7 @@ impl Router {
                     let qos = publish.qos;
                     let pkid = publish.pkid;
 
-                    let keep = {
+                    let passed_acl = {
                         let connection = &self.connections[id];
                         // ACLs are only applicable is there is at least one defined
                         if connection.acls.len() > 0 {
@@ -604,7 +604,7 @@ impl Router {
 
                     // Decide weather to keep or discard this packet
                     // Packet will be discard if *at least one* filter returns *false*
-                    let keep = keep
+                    let keep = passed_acl
                         && self.publish_filters.iter().fold(true, |keep, f| {
                             keep && f.filter(&mut publish, properties.as_mut())
                         });
@@ -626,10 +626,10 @@ impl Router {
                         QoS::AtLeastOnce => {
                             let puback = PubAck {
                                 pkid,
-                                reason: if keep {
-                                    PubAckReason::Success
-                                } else {
-                                    PubAckReason::PayloadFormatInvalid
+                                reason: match (keep, passed_acl) {
+                                    (false, false) => PubAckReason::NotAuthorized,
+                                    (false, true) => PubAckReason::PayloadFormatInvalid,
+                                    _ => PubAckReason::Success,
                                 },
                             };
 
@@ -640,24 +640,24 @@ impl Router {
                         QoS::ExactlyOnce => {
                             let pubrec = PubRec {
                                 pkid,
-                                reason: if keep {
-                                    PubRecReason::Success
-                                } else {
-                                    PubRecReason::PayloadFormatInvalid
+                                reason: match (keep, passed_acl) {
+                                    (false, false) => PubRecReason::NotAuthorized,
+                                    (false, true) => PubRecReason::PayloadFormatInvalid,
+                                    _ => PubRecReason::Success,
                                 },
                             };
 
                             let ackslog = self.ackslog.get_mut(id).unwrap();
-                            ackslog.pubrec(publish, properties, pubrec);
+                            ackslog.pubrec_ack_only(pubrec);
                             force_ack = true;
-                            continue;
                         }
                         QoS::AtMostOnce => {
                             // Do nothing
                         }
                     };
                     if !keep {
-                        break;
+                        //disconnect = true;
+                        continue;
                     }
                     self.router_meters.total_publishes += 1;
 
@@ -711,13 +711,14 @@ impl Router {
 
                         let connection = self.connections.get_mut(id).unwrap();
 
-                        if connection.acls.len() > 0
+                        if dbg!(&connection.acls).len() > 0
                             && !connection
                                 .acls
                                 .iter()
                                 .any(|acl| acl.read && acl.rule.matches_filter(&f.path))
                         {
                             info!("Refusing subscription on topic {}", f.path);
+                            return_codes.push(SubscribeReasonCode::NotAuthorized);
                             continue;
                         }
                         info!("Adding subscription on topic {}", f.path);

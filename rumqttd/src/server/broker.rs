@@ -66,7 +66,6 @@ pub enum Error {
 
 pub struct Broker {
     config: Arc<Config>,
-    acls: Vec<Acl>,
     router_tx: Sender<(ConnectionId, Event)>,
 }
 
@@ -95,7 +94,6 @@ impl Broker {
                 Broker {
                     config,
                     router_tx,
-                    acls: vec![],
                 }
             }
             None => {
@@ -103,15 +101,9 @@ impl Broker {
                 Broker {
                     config,
                     router_tx,
-                    acls: vec![],
                 }
             }
         }
-    }
-
-    pub fn with_acls<A: Into<Acl>, I: IntoIterator<Item = A>>(mut self, acls: I) -> Self {
-        self.acls = acls.into_iter().map(|acl| acl.into()).collect();
-        self
     }
 
     // pub fn new_local_cluster(
@@ -169,7 +161,6 @@ impl Broker {
         // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex. max connection limit).
         let (link_tx, link_rx, _ack) = LinkBuilder::new(client_id, self.router_tx.clone())
-            .acls(&self.acls[..])
             .build()?;
         Ok((link_tx, link_rx))
     }
@@ -525,7 +516,7 @@ async fn remote<P: Protocol>(
 
     let dynamic_filters = config.dynamic_filters;
 
-    let connect_packet = match mqtt_connect(config, &mut network).await {
+    let connect_packet = match mqtt_connect(config.clone(), &mut network).await {
         Ok(p) => p,
         Err(e) => {
             error!(error=?e, "Error while handling MQTT connect packet");
@@ -533,9 +524,9 @@ async fn remote<P: Protocol>(
         }
     };
 
-    let (mut client_id, clean_session) = match &connect_packet {
-        Packet::Connect(ref connect, _, _, _, _) => {
-            (connect.client_id.clone(), connect.clean_session)
+    let (mut client_id, username, clean_session) = match &connect_packet {
+        Packet::Connect(ref connect, _, _, _, ref login) => {
+            (connect.client_id.clone(), login.as_ref().map(|login| &login.username), connect.clean_session)
         }
         _ => unreachable!(),
     };
@@ -546,13 +537,12 @@ async fn remote<P: Protocol>(
         client_id = format!("rumqtt-{uuid}");
         assigned_client_id = Some(client_id.clone());
     }
-
-    if let Some(tenant_id) = &tenant_id {
-        // client_id is set to "tenant_id.client_id"
-        // this is to make sure we are consistent,
-        // as Connection uses this format of client_id
-        client_id = format!("{tenant_id}.{client_id}");
-    }
+    let mut client_id = match (&tenant_id, username) {
+        (Some(tenant_id),Some(username)) => format!("{username}.{tenant_id}.{client_id}"),
+        (Some(tenant_id), _) => format!("{tenant_id}.{client_id}"),
+        (_, Some(username)) => format!("{username}.{client_id}"),
+        _ => client_id,
+    };
 
     if let Some(sender) = will_handlers.lock().unwrap().remove(&client_id) {
         let awaiting_will = if clean_session {
@@ -573,9 +563,11 @@ async fn remote<P: Protocol>(
     let mut link = match RemoteLink::new(
         router_tx.clone(),
         tenant_id.clone(),
+        username.cloned(),
         network,
         connect_packet,
         dynamic_filters,
+        &config.acls,
         assigned_client_id,
     )
     .await

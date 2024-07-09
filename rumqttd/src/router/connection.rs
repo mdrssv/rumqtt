@@ -41,6 +41,7 @@ impl Connection {
     /// Create connection state to hold identifying information of connecting device
     pub fn new(
         tenant_id: Option<String>,
+        username: Option<String>,
         client_id: String,
         clean: bool,
         dynamic_filters: bool,
@@ -59,8 +60,13 @@ impl Connection {
 
         let tenant_id_var = tenant_id
             .as_ref()
-            .map(|tenant_id| ("%u", tenant_id.as_str()));
-        let variables = [Some(("%c", client_id.as_str())), tenant_id_var];
+            .map(|tenant_id| ("%t", tenant_id.as_str()));
+        let username_var = username.as_ref().map(|username| ("%u", username.as_str()));
+        let variables = [
+            Some(("%c", client_id.as_str())),
+            tenant_id_var,
+            username_var,
+        ];
         let acls = acls
             .into_iter()
             .map(|acl| acl.substitute_variables(variables.into_iter().filter_map(|var| var)))
