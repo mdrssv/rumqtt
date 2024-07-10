@@ -91,17 +91,11 @@ impl Broker {
                 // Start router first and then cluster in the background
                 let router_tx = router.spawn();
                 // cluster.spawn();
-                Broker {
-                    config,
-                    router_tx,
-                }
+                Broker { config, router_tx }
             }
             None => {
                 let router_tx = router.spawn();
-                Broker {
-                    config,
-                    router_tx,
-                }
+                Broker { config, router_tx }
             }
         }
     }
@@ -160,8 +154,8 @@ impl Broker {
     pub fn link(&self, client_id: &str) -> Result<(LinkTx, LinkRx), local::LinkError> {
         // Register this connection with the router. Router replies with ack which if ok will
         // start the link. Router can sometimes reject the connection (ex. max connection limit).
-        let (link_tx, link_rx, _ack) = LinkBuilder::new(client_id, self.router_tx.clone())
-            .build()?;
+        let (link_tx, link_rx, _ack) =
+            LinkBuilder::new(client_id, self.router_tx.clone()).build()?;
         Ok((link_tx, link_rx))
     }
 
@@ -525,9 +519,11 @@ async fn remote<P: Protocol>(
     };
 
     let (mut client_id, username, clean_session) = match &connect_packet {
-        Packet::Connect(ref connect, _, _, _, ref login) => {
-            (connect.client_id.clone(), login.as_ref().map(|login| &login.username), connect.clean_session)
-        }
+        Packet::Connect(ref connect, _, _, _, ref login) => (
+            connect.client_id.clone(),
+            login.as_ref().map(|login| &login.username),
+            connect.clean_session,
+        ),
         _ => unreachable!(),
     };
 
@@ -538,7 +534,7 @@ async fn remote<P: Protocol>(
         assigned_client_id = Some(client_id.clone());
     }
     let mut client_id = match (&tenant_id, username) {
-        (Some(tenant_id),Some(username)) => format!("{username}.{tenant_id}.{client_id}"),
+        (Some(tenant_id), Some(username)) => format!("{username}.{tenant_id}.{client_id}"),
         (Some(tenant_id), _) => format!("{tenant_id}.{client_id}"),
         (_, Some(username)) => format!("{username}.{client_id}"),
         _ => client_id,

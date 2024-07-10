@@ -1,5 +1,5 @@
-use std::{borrow::Cow, fmt::Display, str::FromStr};
 use serde::{Deserialize, Serialize};
+use std::{borrow::Cow, fmt::Display, str::FromStr};
 use thiserror::Error;
 
 use super::Connection;
@@ -56,7 +56,13 @@ impl Acl {
         }
     }
 
-    pub(crate) fn matches(&self, connection: &Connection, topic: &str, read: bool, write: bool) -> Option<bool> {
+    pub(crate) fn matches(
+        &self,
+        connection: &Connection,
+        topic: &str,
+        read: bool,
+        write: bool,
+    ) -> Option<bool> {
         if !self.rule.matches(topic) {
             return None;
         }

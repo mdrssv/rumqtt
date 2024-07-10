@@ -18,6 +18,7 @@ use crate::{
 mod acl;
 mod alertlog;
 mod connection;
+mod filter;
 mod graveyard;
 pub mod iobufs;
 mod logs;
@@ -25,7 +26,6 @@ mod routing;
 mod scheduler;
 pub(crate) mod shared_subs;
 mod waiters;
-mod filter;
 
 pub use acl::{Acl, AclError, AclRule};
 pub use alertlog::Alert;
