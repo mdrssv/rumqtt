@@ -586,7 +586,7 @@ impl Router {
                                 if !connection
                                     .acls
                                     .iter()
-                                    .any(|acl| acl.write && acl.rule.matches_topic(&topic))
+                                    .any(|acl| acl.matches(connection, &topic, false, true).unwrap_or_default())
                                 {
                                     info!("failed acl");
                                     false
@@ -712,10 +712,10 @@ impl Router {
                         let connection = self.connections.get_mut(id).unwrap();
 
                         if dbg!(&connection.acls).len() > 0
-                            && !connection
-                                .acls
-                                .iter()
-                                .any(|acl| acl.read && acl.rule.matches_filter(&f.path))
+                            && !connection.acls.iter().any(|acl| {
+                                acl.matches(connection, &f.path, true, false)
+                                    .unwrap_or_default()
+                            })
                         {
                             info!("Refusing subscription on topic {}", f.path);
                             return_codes.push(SubscribeReasonCode::NotAuthorized);

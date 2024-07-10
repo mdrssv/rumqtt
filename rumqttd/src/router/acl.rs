@@ -2,6 +2,8 @@ use std::{borrow::Cow, fmt::Display, str::FromStr};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use super::Connection;
+
 const TOPIC_SEP: &'static str = "/";
 const TOPIC_WILDCARD: &'static str = "#";
 const TOPIC_ANY: &'static str = "+";
@@ -32,7 +34,7 @@ impl Acl {
     /// use rumqttd::Acl;
     /// let acl: Acl = "test/#:rw".parse().unwrap();
     /// # assert_eq!(acl, Acl { rule: "test/#".into(), read: true, write: true });
-    /// # assert_eq!("test/#".parse::<Acl>(), Err(AclError::NoFlags));
+    /// # assert_eq!("test/#".parse::<Acl>(), Err(rumqttd::AclError::NoFlags));
     /// ```
     pub fn new(rule: impl Into<AclRule>, read: bool, write: bool) -> Self {
         Self {
@@ -52,6 +54,19 @@ impl Acl {
             rule,
             ..self.clone()
         }
+    }
+
+    pub(crate) fn matches(&self, connection: &Connection, topic: &str, read: bool, write: bool) -> Option<bool> {
+        if !self.rule.matches(topic) {
+            return None;
+        }
+        if write && !self.write {
+            return Some(false);
+        }
+        if read && !self.read {
+            return Some(false);
+        }
+        Some(true)
     }
 }
 
@@ -177,23 +192,6 @@ impl AsRef<str> for AclRule {
 }
 
 impl AclRule {
-    fn matches(&self, path: &str, _filter: bool) -> bool {
-        for (tc, rc) in path
-            .split(TOPIC_SEP)
-            .map(Some)
-            .chain([None])
-            .zip(self.0.as_ref().split(TOPIC_SEP).map(Some).chain([None]))
-        {
-            match (tc, rc) {
-                (Some(_), Some(TOPIC_WILDCARD)) => return true,
-                (Some(_), Some(TOPIC_ANY)) => continue,
-                (tc, rc) if tc == rc => continue,
-                _ => return false,
-            }
-        }
-        true
-    }
-
     /// Checks if the ACL rule matches a given topic.
     ///
     /// # Parameters
@@ -209,41 +207,28 @@ impl AclRule {
     /// ```
     /// use rumqttd::AclRule;
     /// let rule = AclRule::from("test/#");
-    /// assert!(rule.matches_topic("test/abc"));
-    /// assert!(rule.matches_topic("test/abc/def"));
+    /// assert!(rule.matches("test/abc"));
+    /// assert!(rule.matches("test/abc/def"));
     ///
     /// let rule = AclRule::from("test/+");
-    /// assert!(rule.matches_topic("test/abc"));
-    /// assert!(!rule.matches_topic("test/abc/def"));
+    /// assert!(rule.matches("test/abc"));
+    /// assert!(!rule.matches("test/abc/def"));
     /// ```
-    pub fn matches_topic(&self, topic: impl AsRef<str>) -> bool {
-        self.matches(topic.as_ref(), false)
-    }
-
-    /// Checks if the ACL rule matches a given filter.
-    ///
-    /// # Parameters
-    ///
-    /// - `filter`: The filter to match against.
-    ///
-    /// # Returns
-    ///
-    /// `true` if the filter matches the ACL rule, `false` otherwise.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use rumqttd::AclRule;
-    /// let rule = AclRule::from("test/#");
-    /// assert!(rule.matches_filter("test/abc"));
-    /// assert!(rule.matches_filter("test/abc/def"));
-    ///
-    /// let rule = AclRule::from("test/+");
-    /// assert!(rule.matches_filter("test/abc"));
-    /// assert!(!rule.matches_filter("test/abc/def"));
-    /// ```
-    pub fn matches_filter(&self, filter: impl AsRef<str>) -> bool {
-        self.matches(filter.as_ref(), true)
+    pub fn matches(&self, path: &str) -> bool {
+        for (tc, rc) in path
+            .split(TOPIC_SEP)
+            .map(Some)
+            .chain([None])
+            .zip(self.0.as_ref().split(TOPIC_SEP).map(Some).chain([None]))
+        {
+            match (tc, rc) {
+                (Some(_), Some(TOPIC_WILDCARD)) => return true,
+                (Some(_), Some(TOPIC_ANY)) => continue,
+                (tc, rc) if tc == rc => continue,
+                _ => return false,
+            }
+        }
+        true
     }
 
     /// Substitutes variables in the ACL rule with provided values.
@@ -310,34 +295,17 @@ mod tests {
     #[test]
     fn matches_topic_wildcard() {
         let rule = AclRule::from("test/#");
-        assert!(rule.matches_topic("test/abc"));
-        assert!(rule.matches_topic("test/abc/def"));
+        assert!(rule.matches("test/abc"));
+        assert!(rule.matches("test/abc/def"));
     }
     #[test]
     fn matches_topic_any() {
         let rule = AclRule::from("test/+");
-        assert!(rule.matches_topic("test/abc"));
-        assert!(!rule.matches_topic("test/abc/def"));
+        assert!(rule.matches("test/abc"));
+        assert!(!rule.matches("test/abc/def"));
         let rule = AclRule::from("test/+/sub/+");
-        assert!(rule.matches_topic("test/abc/sub/def"));
-        assert!(!rule.matches_topic("test/abc/bub/def"));
-    }
-
-    #[test]
-    fn matches_filter_wildcard() {
-        let rule = AclRule::from("test/#");
-        assert!(rule.matches_filter("test/abc"));
-        assert!(rule.matches_filter("test/abc/def"));
-        assert!(!rule.matches_filter("#"));
-    }
-    #[test]
-    fn matches_filter_any() {
-        let rule = AclRule::from("test/+");
-        assert!(rule.matches_filter("test/abc"));
-        assert!(!rule.matches_filter("test/abc/def"));
-        let rule = AclRule::from("test/+/sub/+");
-        assert!(rule.matches_filter("test/+/sub/def"));
-        assert!(!rule.matches_filter("test/abc/+/def"));
+        assert!(rule.matches("test/abc/sub/def"));
+        assert!(!rule.matches("test/abc/bub/def"));
     }
 
     #[test]
