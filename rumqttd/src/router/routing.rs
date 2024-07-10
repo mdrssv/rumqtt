@@ -10,7 +10,7 @@ use crate::router::{ConnectionEvents, Forward};
 use crate::segments::Position;
 use crate::*;
 use flume::{bounded, Receiver, RecvError, Sender, TryRecvError};
-use router::connection;
+use router::connection::{self, TENANTS_PREFIX};
 use slab::Slab;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::str::Utf8Error;
@@ -576,18 +576,17 @@ impl Router {
                     let qos = publish.qos;
                     let pkid = publish.pkid;
 
+                    let connection = &self.connections[id];
                     let passed_acl = {
-                        let connection = &self.connections[id];
                         // ACLs are only applicable is there is at least one defined
                         if connection.acls.len() > 0 {
                             let topic_str = std::str::from_utf8(&publish.topic);
                             // Non UTF8 topic constitutes an invalid topic
                             if let Ok(topic) = topic_str {
-                                if !connection
-                                    .acls
-                                    .iter()
-                                    .any(|acl| acl.matches(connection, &topic, false, true).unwrap_or_default())
-                                {
+                                if !connection.acls.iter().any(|acl| {
+                                    acl.matches(connection, &topic, false, true)
+                                        .unwrap_or_default()
+                                }) {
                                     info!("failed acl");
                                     false
                                 } else {
@@ -606,7 +605,7 @@ impl Router {
                     // Packet will be discard if *at least one* filter returns *false*
                     let keep = passed_acl
                         && self.publish_filters.iter().fold(true, |keep, f| {
-                            keep && f.filter(&mut publish, properties.as_mut())
+                            keep && f.filter(&connection.into(), &mut publish, properties.as_mut())
                         });
 
                     // Prepare acks for the above publish
@@ -656,7 +655,11 @@ impl Router {
                         }
                     };
                     if !keep {
-                        //disconnect = true;
+                        let mqtt_v3 = true;
+                        if mqtt_v3 {
+                            disconnect = true;
+                            break;
+                        }
                         continue;
                     }
                     self.router_meters.total_publishes += 1;
@@ -1283,10 +1286,14 @@ fn append_to_commitlog(
 
     // Ensure that only clients associated with a tenant can publish to tenant's topic
     #[cfg(feature = "validate-tenant-prefix")]
-    if let Some(tenant_prefix) = &connection.tenant_prefix {
-        if !topic.starts_with(tenant_prefix) {
+    if let Some(tenant_id) = &connection.tenant_id {
+        if !topic
+            .split("/")
+            .take(2)
+            .eq([TENANTS_PREFIX, tenant_id.as_str()])
+        {
             return Err(RouterError::BadTenant(
-                tenant_prefix.to_owned(),
+                tenant_id.to_owned(),
                 topic.to_owned(),
             ));
         }
@@ -1337,7 +1344,7 @@ fn append_will_message(
     properties: Option<PublishProperties>,
     datalog: &mut DataLog,
     notifications: &mut VecDeque<(ConnectionId, DataRequest)>,
-    #[cfg(feature = "validate-tenant-prefix")] tenant_prefix: Option<String>,
+    #[cfg(feature = "validate-tenant-prefix")] tenant_id: Option<String>,
 ) -> Result<Offset, RouterError> {
     // TODO: broker should properly send the disconnect packet!
     if properties
@@ -1354,10 +1361,14 @@ fn append_will_message(
 
     // Ensure that only clients associated with a tenant can publish to tenant's topic
     #[cfg(feature = "validate-tenant-prefix")]
-    if let Some(tenant_prefix) = tenant_prefix {
-        if !topic.starts_with(&tenant_prefix) {
+    if let Some(tenant_id) = tenant_id {
+        if !topic
+            .split("/")
+            .take(2)
+            .eq([TENANTS_PREFIX, tenant_id.as_str()])
+        {
             return Err(RouterError::BadTenant(
-                tenant_prefix.to_owned(),
+                tenant_id.to_owned(),
                 topic.to_owned(),
             ));
         }
@@ -1786,14 +1797,19 @@ fn validate_subscription(
     filter: &protocol::Filter,
 ) -> Result<(), RouterError> {
     trace!(
-        "validate subscription = {}, tenant = {:?}",
+        "validate subscription = {}, tenant = {TENANTS_PREFIX}/{:?}",
         filter.path,
-        connection.tenant_prefix
+        connection.tenant_id
     );
     // Ensure that only client devices of the tenant can
     #[cfg(feature = "validate-tenant-prefix")]
-    if let Some(tenant_prefix) = &connection.tenant_prefix {
-        if !filter.path.starts_with(tenant_prefix) {
+    if let Some(tenant_id) = &connection.tenant_id {
+        if !filter
+            .path
+            .split("/")
+            .take(2)
+            .eq([TENANTS_PREFIX, tenant_id.as_str()])
+        {
             return Err(RouterError::InvalidFilterPrefix(filter.path.to_owned()));
         }
     }

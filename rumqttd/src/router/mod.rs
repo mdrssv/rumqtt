@@ -27,10 +27,10 @@ pub(crate) mod shared_subs;
 mod waiters;
 mod filter;
 
-pub use filter::{PublishFilter, PublishFilterRef};
 pub use acl::{Acl, AclError, AclRule};
 pub use alertlog::Alert;
 pub use connection::Connection;
+pub use filter::{PublishFilter, PublishFilterContext, PublishFilterRef};
 pub use routing::Router;
 pub use waiters::Waiters;
 

@@ -23,7 +23,7 @@ pub use link::local;
 pub use link::meters;
 pub use router::{
     Acl, AclError, AclRule, Alert, IncomingMeter, Meter, Notification, OutgoingMeter,
-    PublishFilter, PublishFilterRef,
+    PublishFilter, PublishFilterContext, PublishFilterRef,
 };
 use segments::Storage;
 pub use server::Broker;

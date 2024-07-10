@@ -7,14 +7,18 @@ use std::collections::{HashMap, HashSet};
 
 use super::ConnectionEvents;
 
+pub(crate) const TENANTS_PREFIX: &'static str = "/tenants/";
+
 /// Used to register a new connection with the router
 /// Connection messages encompasses a handle for router to
 /// communicate with this connection
 #[derive(Debug)]
 pub struct Connection {
     pub client_id: String,
-    /// Id of client's organisation/tenant and the prefix associated with tenant's MQTT topic
-    pub tenant_prefix: Option<String>,
+    /// Id of client's organisation/tenant
+    pub tenant_id: Option<String>,
+    /// Username after successful authentication
+    pub username: Option<String>,
     /// Dynamically create subscription filters incase they didn't exist during a publish
     pub dynamic_filters: bool,
     /// ACLs with substitued variables for this connection
@@ -49,13 +53,11 @@ impl Connection {
     ) -> Connection {
         // Change client id to -> tenant_id.client_id and derive topic path prefix
         // to validate topics
-        let (client_id, tenant_prefix) = match tenant_id {
-            Some(ref tenant_id) => {
-                let tenant_prefix = Some("/tenants/".to_owned() + &tenant_id + "/");
-                let client_id = tenant_id.to_owned() + "." + &client_id;
-                (client_id, tenant_prefix)
-            }
-            None => (client_id, None),
+        let client_id = if let Some(ref tenant_id) = tenant_id {
+            let client_id = tenant_id.to_owned() + "." + &client_id;
+            client_id
+        } else {
+            client_id
         };
 
         let tenant_id_var = tenant_id
@@ -74,7 +76,8 @@ impl Connection {
 
         Connection {
             client_id,
-            tenant_prefix,
+            tenant_id,
+            username,
             dynamic_filters,
             clean,
             subscriptions: HashSet::default(),

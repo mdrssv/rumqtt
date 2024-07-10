@@ -1,15 +1,39 @@
 use std::{fmt::Debug, ops::Deref, sync::Arc};
 
+use super::Connection;
+
 use crate::protocol::{Publish, PublishProperties};
+
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub struct PublishFilterContext<'a> {
+    pub username: Option<&'a String>,
+    pub tennant_id: Option<&'a String>,
+}
+
+impl<'a> From<&'a Connection> for PublishFilterContext<'a> {
+    fn from(value: &'a Connection) -> Self {
+        Self {
+            username: value.username.as_ref(),
+            tennant_id: value.tenant_id.as_ref(),
+        }
+    }
+}
 
 /// Filter for [`Publish`] packets
 pub trait PublishFilter {
-    /// Determines weather an [`Publish`] packet should be processed
+    /// Determines whether an [`Publish`] packet should be processed
     /// Arguments:
+    /// * `connection`: connection which delivered the `packet`, might contain a username
     /// * `packet`: to be published, may be modified if necessary
     /// * `properties`: received along with the packet, may be `None` for older MQTT versions
     /// Returns: [`bool`] indicating if the packet should be processed
-    fn filter(&self, packet: &mut Publish, properties: Option<&mut PublishProperties>) -> bool;
+    fn filter(
+        &self,
+        context: &PublishFilterContext,
+        packet: &mut Publish,
+        properties: Option<&mut PublishProperties>,
+    ) -> bool;
 }
 
 /// Container for either an owned [`PublishFilter`] or an `'static` reference
@@ -39,20 +63,27 @@ impl Deref for PublishFilterRef {
     }
 }
 
-/// Implements [`PublishFilter`] for any ordinary function 
+/// Implements [`PublishFilter`] for any ordinary function
 impl<F> PublishFilter for F
 where
-    F: Fn(&mut Publish, Option<&mut PublishProperties>) -> bool + Send + Sync,
+    F: Fn(&PublishFilterContext, &mut Publish, Option<&mut PublishProperties>) -> bool
+        + Send
+        + Sync,
 {
-    fn filter(&self, packet: &mut Publish, properties: Option<&mut PublishProperties>) -> bool {
-        self(packet, properties)
+    fn filter(
+        &self,
+        context: &PublishFilterContext<'_>,
+        packet: &mut Publish,
+        properties: Option<&mut PublishProperties>,
+    ) -> bool {
+        self(context, packet, properties)
     }
 }
 
-/// Implements the conversion 
+/// Implements the conversion
 /// ```rust
-/// # use rumqttd::{protocol::{Publish, PublishProperties}, PublishFilterRef};
-/// fn filter_static(packet: &mut Publish, properties: Option<&mut PublishProperties>) -> bool {
+/// # use rumqttd::{protocol::{Publish, PublishProperties}, PublishFilterContext, PublishFilterRef};
+/// fn filter_static(context: &PublishFilterContext, packet: &mut Publish, properties: Option<&mut PublishProperties>) -> bool {
 ///     todo!()
 /// }
 ///
@@ -61,22 +92,24 @@ where
 /// ```
 impl<F> From<&'static F> for PublishFilterRef
 where
-    F: Fn(&mut Publish, Option<&mut PublishProperties>) -> bool + Send + Sync,
+    F: Fn(&PublishFilterContext, &mut Publish, Option<&mut PublishProperties>) -> bool
+        + Send
+        + Sync,
 {
     fn from(value: &'static F) -> Self {
         Self::Static(value)
     }
 }
 
-/// Implements the conversion 
+/// Implements the conversion
 /// ```rust
 /// # use std::boxed::Box;
-/// # use rumqttd::{protocol::{Publish, PublishProperties}, PublishFilter, PublishFilterRef};
+/// # use rumqttd::{protocol::{Publish, PublishProperties}, PublishFilter, PublishFilterContext, PublishFilterRef};
 /// #[derive(Clone)]
 /// struct MyFilter {}
 ///
 /// impl PublishFilter for MyFilter {
-///     fn filter(&self, packet: &mut Publish, properties: Option<&mut PublishProperties>) -> bool {
+///     fn filter(&self,context: &PublishFilterContext<'_>, packet: &mut Publish, properties: Option<&mut PublishProperties>) -> bool {
 ///         todo!()
 ///     }
 /// }
@@ -107,13 +140,22 @@ where
 mod tests {
     use super::*;
 
-    fn filter_static(_packet: &mut Publish, _properties: Option<&mut PublishProperties>) -> bool {
+    fn filter_static(
+        _context: &PublishFilterContext<'_>,
+        _packet: &mut Publish,
+        _properties: Option<&mut PublishProperties>,
+    ) -> bool {
         true
     }
     struct Prejudiced(bool);
 
     impl PublishFilter for Prejudiced {
-        fn filter(&self, _packet: &mut Publish,_propertiess: Option<&mut PublishProperties>) -> bool {
+        fn filter(
+            &self,
+            _context: &PublishFilterContext<'_>,
+            _packet: &mut Publish,
+            _propertiess: Option<&mut PublishProperties>,
+        ) -> bool {
             self.0
         }
     }
