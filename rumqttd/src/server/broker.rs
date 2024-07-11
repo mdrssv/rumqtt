@@ -74,6 +74,22 @@ impl Broker {
         Self::with_filter(config, Vec::new())
     }
 
+    /// Instantiate an new [`Broker`] with publish filters  
+    ///
+    /// * `config`: broker configuration
+    /// * `publish_filters`: takes a [`Vec`] of filters, [`PublishFilterRef`] can be constructed
+    /// from an [`Box<dyn PublishFilter> `] or an ordinary function
+    ///
+    /// Example:
+    /// ```
+    /// use rumqttd::{protocol::{Publish, PublishProperties}, Broker, Config, PublishFilterContext};
+    /// let config = Config::default();
+    /// fn my_filter(context: &PublishFilterContext, publish: &mut Publish, properties: Option<&mut
+    /// PublishProperties>) -> bool {
+    ///     unimplemented!()
+    /// }
+    /// let broker = Broker::with_filter(config, vec![(&my_filter).into()]);
+    /// ```
     pub fn with_filter(config: Config, publish_filters: Vec<PublishFilterRef>) -> Broker {
         let config = Arc::new(config);
         let router_config = config.router.clone();
