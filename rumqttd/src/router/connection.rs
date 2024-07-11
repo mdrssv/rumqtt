@@ -33,8 +33,6 @@ pub struct Connection {
     pub last_will_properties: Option<LastWillProperties>,
     /// Connection events
     pub events: ConnectionEvents,
-    /// MQTT version
-    pub(crate) protocol_level: u8,
     /// Topic aliases set by clients
     pub(crate) topic_aliases: HashMap<u16, Topic>,
     /// Topic aliases used by broker

@@ -655,7 +655,8 @@ impl Router {
                         }
                     };
                     if !keep {
-                        if connection.protocol_level == 3 {
+                        let mqtt_v3 = true;
+                        if mqtt_v3 {
                             disconnect = true;
                             break;
                         }
