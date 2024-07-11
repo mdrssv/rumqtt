@@ -58,7 +58,7 @@ impl Acl {
 
     pub(crate) fn matches(
         &self,
-        connection: &Connection,
+        _connection: &Connection,
         topic: &str,
         read: bool,
         write: bool,
@@ -342,6 +342,8 @@ mod tests {
     #[test]
     fn string_parse() {
         let rule: Acl = "test/+:r".parse().unwrap();
+        assert!(rule.read);
+        assert!(!rule.write);
         assert_eq!(rule.to_string().parse::<Acl>().unwrap(), rule);
     }
 }
