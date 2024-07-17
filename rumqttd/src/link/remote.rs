@@ -185,8 +185,7 @@ where
     // Wait for MQTT connect packet and error out if it's not received in time to prevent
     // DOS attacks by filling total connections that the server can handle with idle open
     // connections which results in server rejecting new connections
-    let connection_timeout_ms = config.connection_timeout_ms.into();
-    let packet = time::timeout(Duration::from_millis(connection_timeout_ms), async {
+    let packet = time::timeout(Duration::from_secs(30), async {
         let packet = network.read().await?;
         Ok::<_, network::Error>(packet)
     })
