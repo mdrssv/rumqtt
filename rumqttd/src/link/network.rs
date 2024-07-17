@@ -58,7 +58,7 @@ impl<P: Protocol> Network<P> {
             // Overwritten by keepalive value in connect packet, otherwise we
             // would wait indefinitely until we get a packet / network error
             // when we call read.
-            keepalive: Duration::MAX,
+            keepalive: Duration::from_secs(30),
             protocol,
         }
     }
