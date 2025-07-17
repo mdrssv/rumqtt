@@ -588,6 +588,7 @@ impl Router {
                                         .unwrap_or_default()
                                 }) {
                                     info!("failed acl");
+                                    trace!("acls: {:?}", &connection.acls);
                                     false
                                 } else {
                                     info!("passed acl");

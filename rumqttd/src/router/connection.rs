@@ -63,6 +63,7 @@ impl Connection {
         let tenant_id_var = tenant_id
             .as_ref()
             .map(|tenant_id| ("%t", tenant_id.as_str()));
+        tracing::trace!("connection username: {username:?}");
         let username_var = username.as_ref().map(|username| ("%u", username.as_str()));
         let variables = [
             Some(("%c", client_id.as_str())),
