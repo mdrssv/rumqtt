@@ -228,7 +228,7 @@ impl AclRule {
             .zip(self.0.as_ref().split(TOPIC_SEP).map(Some).chain([None]))
         {
             match (tc, rc) {
-                (Some(_), Some(TOPIC_WILDCARD)) => return true,
+                (_, Some(TOPIC_WILDCARD)) => return true,
                 (Some(_), Some(TOPIC_ANY)) => continue,
                 (tc, rc) if tc == rc => continue,
                 _ => return false,
@@ -312,6 +312,10 @@ mod tests {
         let rule = AclRule::from("test/+/sub/+");
         assert!(rule.matches("test/abc/sub/def"));
         assert!(!rule.matches("test/abc/bub/def"));
+        let rule = AclRule::from("commonname/+/in/#");
+        assert!(rule.matches("commonname/000002424AABBCC/in"));
+        let rule = AclRule::from("commonname/+/#");
+        assert!(rule.matches("commonname/000002424AABBCC/in"));
     }
 
     #[test]
